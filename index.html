@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Конфигуратор Кейпада STC8H</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1e1e2e; color: #cdd6f4; padding: 30px; margin: 0; }
+        .container { max-width: 800px; margin: 0 auto; background: #252538; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        h2 { margin-top: 0; color: #89b4fa; border-bottom: 2px solid #45475a; padding-bottom: 10px; }
+        .status-bar { display: flex; align-items: center; justify-content: space-between; background: #11111b; padding: 12px 20px; border-radius: 8px; margin-bottom: 25px; }
+        .status { font-weight: bold; color: #f38ba8; }
+        .connected { color: #a6e3a1; }
+        button { font-weight: bold; padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; transition: background 0.2s; }
+        .btn-primary { background: #89b4fa; color: #11111b; }
+        .btn-primary:hover { background: #b4befe; }
+        .btn-success { background: #a6e3a1; color: #11111b; width: 100%; padding: 15px; font-size: 16px; margin-top: 20px; }
+        .btn-success:hover { background: #94e2d5; }
+        .btn-success:disabled { background: #585b70; color: #7f849c; cursor: not-allowed; }
+        
+        .layout-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 25px; }
+        .key-cell { background: #313244; padding: 15px; border-radius: 8px; text-align: center; border: 2px solid transparent; cursor: pointer; }
+        .key-cell:hover { border-color: #585b70; }
+        .key-cell.active { border-color: #f9e2af; background: #45475a; }
+        .key-title { font-weight: bold; margin-bottom: 5px; color: #cdd6f4; }
+        .key-desc { font-size: 12px; color: #a6adc8; font-family: monospace; }
+
+        .config-panel { background: #11111b; padding: 20px; border-radius: 8px; display: none; }
+        .config-panel.show { display: block; }
+        label { display: block; margin-bottom: 8px; font-weight: bold; color: #bac2de; }
+        select { width: 100%; padding: 10px; background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; margin-bottom: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Настройка профиля клавиш Кейпада (STC8H8K64U)</h2>
+    
+    <div class="status-bar">
+        <div>Статус: <span id="status" class="status">Устройство отключено</span></div>
+        <button id="connectBtn" class="btn-primary">Подключить через WebHID</button>
+    </div>
+
+    <h3>1. Выберите кнопку для изменения</h3>
+    <div class="layout-grid" id="keyboardGrid"></div>
+
+    <div class="config-panel" id="configPanel">
+        <h3>2. Настройка выбранной кнопки (<span id="selectedKeyLabel">0</span>)</h3>
+        
+        <label>Модификатор (Комбинация клавиш):</label>
+        <select id="modSelect">
+            <option value="0x00">Нет (Обычное нажатие)</option>
+            <option value="0x01">Левый Ctrl</option>
+            <option value="0x02">Левый Shift</option>
+            <option value="0x04">Левый Alt</option>
+            <option value="0x08">Левый Win</option>
+            <option value="0x05">Ctrl + Alt</option>
+            <option value="0x03">Ctrl + Shift</option>
+        </select>
+
+        <label>Основная клавиша:</label>
+        <select id="keySelect">
+            <option value="0x06">C (Копировать при Ctrl)</option>
+            <option value="0x19">V (Вставить при Ctrl)</option>
+            <option value="0x1A">X (Вырезать при Ctrl)</option>
+            <option value="0x1D">Z (Отменить при Ctrl)</option>
+            <option value="0x04">A (Выделить все при Ctrl)</option>
+            <option value="0x28">Enter</option>
+            <option value="0x29">Escape</option>
+            <option value="0x2C">Пробел (Space)</option>
+            <option value="0x2B">Tab</option>
+            <option value="0x1E">1</option><option value="0x1F">2</option><option value="0x20">3</option>
+            <option value="0x21">4</option><option value="0x22">5</option><option value="0x23">6</option>
+            <option value="0x24">7</option><option value="0x25">8</option><option value="0x26">9</option>
+            <option value="0x27">0</option>
+            <option value="0x3A">F1</option><option value="0x3B">F2</option><option value="0x3C">F3</option>
+            <option value="0x3D">F4</option><option value="0x3E">F5</option><option value="0x3F">F6</option>
+            <option value="0x40">F7</option><option value="0x41">F8</option><option value="0x42">F9</option>
+            <option value="0x43">F10</option><option value="0x44">F11</option><option value="0x45">F12</option>
+        </select>
+    </div>
+
+    <button id="saveBtn" class="btn-success" disabled>3. Записать ВСЕ настройки в память чипа</button>
+</div>
+
+<script>
+let hidDevice = null;
+let activeKeyIndex = null;
+
+// Инициализация дефолтной раскладки (12 кнопок), чтобы не затереть нулями
+const keymap = [
+    { mod: 0x00, key: 0x1E, label: "Кнопка 1" }, // '1'
+    { mod: 0x00, key: 0x1F, label: "Кнопка 2" }, // '2'
+    { mod: 0x00, key: 0x20, label: "Кнопка 3" }, // '3'
+    { mod: 0x00, key: 0x21, label: "Кнопка 4" }, // '4'
+    { mod: 0x00, key: 0x22, label: "Кнопка 5" }, // '5'
+    { mod: 0x00, key: 0x23, label: "Кнопка 6" }, // '6'
+    { mod: 0x00, key: 0x24, label: "Кнопка 7" }, // '7'
+    { mod: 0x00, key: 0x25, label: "Кнопка 8" }, // '8'
+    { mod: 0x00, key: 0x26, label: "Кнопка 9" }, // '9'
+    { mod: 0x00, key: 0x28, label: "Кнопка 10" },// Enter
+    { mod: 0x00, key: 0x27, label: "Кнопка 11" },// '0'
+    { mod: 0x00, key: 0x2C, label: "Кнопка 12" } // Space
+];
+
+// Генерация сетки кнопок в интерфейсе
+const grid = document.getElementById('keyboardGrid');
+function renderGrid() {
+    grid.innerHTML = '';
+    keymap.forEach((k, idx) => {
+        const cell = document.createElement('div');
+        cell.className = `key-cell ${activeKeyIndex === idx ? 'active' : ''}`;
+        cell.onclick = () => selectKey(idx);
+        
+        const modText = k.mod !== 0 ? `Mod(0x${k.mod.toString(16).toUpperCase()}) + ` : '';
+        cell.innerHTML = `
+            <div class="key-title">${k.label}</div>
+            <div class="key-desc">${modText}Key(0x${k.key.toString(16).toUpperCase()})</div>
+        `;
+        grid.appendChild(cell);
+    });
+}
+
+function selectKey(idx) {
+    activeKeyIndex = idx;
+    renderGrid();
+    document.getElementById('selectedKeyLabel').innerText = keymap[idx].label;
+    document.getElementById('modSelect').value = `0x${keymap[idx].mod.toString(16).padStart(2, '0').toUpperCase()}`;
+    document.getElementById('keySelect').value = `0x${keymap[idx].key.toString(16).padStart(2, '0').toUpperCase()}`;
+    document.getElementById('configPanel').classList.add('show');
+}
+
+// Отслеживание изменений селектов
+document.getElementById('modSelect').onchange = (e) => {
+    if (activeKeyIndex !== null) {
+        keymap[activeKeyIndex].mod = parseInt(e.target.value, 16);
+        renderGrid();
+    }
+};
+document.getElementById('keySelect').onchange = (e) => {
+    if (activeKeyIndex !== null) {
+        keymap[activeKeyIndex].key = parseInt(e.target.value, 16);
+        renderGrid();
+    }
+};
+
+// Подключение к HID-устройству
+document.getElementById('connectBtn').onclick = async () => {
+    try {
+        const devices = await navigator.hid.requestDevice({
+            filters: [{ vendorId: 0x34bf, productId: 0xff05 }] // Фильтр по вашему дескриптору
+        });
+        
+        if (devices.length === 0) return;
+        
+        // Фильтруем коллекции: ищем интерфейс, который НЕ является стандартной клавиатурой (usagePage !== 1 || usage !== 6)
+        const rawDevice = devices[0];
+        const hasVendorInterface = rawDevice.collections.some(c => c.usagePage !== 1 || c.usage !== 6);
+
+        if (!hasVendorInterface) {
+            alert("Служебный Vendor-интерфейс устройства заблокирован или не найден. Проверьте usb_desc.c!");
+            return;
+        }
+
+        hidDevice = rawDevice;
+        await hidDevice.open();
+        
+        const statusEl = document.getElementById('status');
+        statusEl.innerText = "Подключено к Vendor-интерфейсу (" + (hidDevice.productName || "STC Кейпад") + ")";
+        statusEl.className = "status connected";
+        document.getElementById('saveBtn').disabled = false;
+    } catch (error) {
+        alert("Ошибка HID подключения: " + error.message);
+    }
+};
+
+// Отправка полной прошивки кнопок
+document.getElementById('saveBtn').onclick = async () => {
+    if (!hidDevice) return;
+
+    // Формируем пакет данных из 25 байт:
+    // байт 0: Магический маркер прошивки (0xAA)
+    // байты 1-24: 12 пар [модификатор, скан-код] последовательно
+    const packet = new Uint8Array(25); 
+    packet[0] = 0xAA; 
+    
+    for (let i = 0; i < 12; i++) {
+        packet[1 + (i * 2)] = keymap[i].mod;     // Модификатор кнопки
+        packet[1 + (i * 2) + 1] = keymap[i].key; // Скан-код кнопки
+    }
+
+    try {
+        // Отправляем массив напрямую через Report ID = 0 (контрольный пайплайн)
+        // Браузер пропустит фрейм, так как мы подключены через Vendor Usage Page
+        await hidDevice.sendReport(0, packet);
+        alert("Данные успешно отправлены! Прошивка запишет их в EEPROM. Если операция прошла удачно, чип напечатает 'OK'.");
+    } catch (error) {
+        alert("Ошибка записи в чип: " + error.message);
+    }
+};
+
+// Первичный рендер
+renderGrid();
+</script>
+</body>
+</html>
