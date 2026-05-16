@@ -124,9 +124,12 @@ let hidDevice = null;
 // Подключение устройства через WebHID
 document.getElementById('connectBtn').onclick = async () => {
     try {
-        // Ищем чип по нашему кастомному VID (0x34BF)
+        // Ищем чип строго по нашему кастомному VID и Usage Page конфигуратора
         const devices = await navigator.hid.requestDevice({
-            filters: [{ vendorId: 0x34bf }]
+            filters: [{ 
+                vendorId: 0x34bf,
+                usagePage: 0xff00
+            }]
         });
 
         if (devices.length === 0) {
@@ -134,9 +137,7 @@ document.getElementById('connectBtn').onclick = async () => {
             return;
         }
 
-        // Ищем конкретно Vendor HID интерфейс (наш Report ID = 2, длина репорта 25 байт)
-        let rawDevice = devices[0];
-        hidDevice = rawDevice;
+        hidDevice = devices[0];
         await hidDevice.open();
         
         const statusEl = document.getElementById('status');
@@ -164,8 +165,8 @@ document.getElementById('saveBtn').onclick = async () => {
     }
 
     try {
-        // Исправлено: Отправляем через Report ID = 2 (наш кастомный Vendor канал)
-        await hidDevice.sendReport(2, packet);
+        // Отправляем через Report ID = 0 на нулевую точку (контрольные посылки OUT)
+        await hidDevice.sendReport(0, packet);
         alert("Настройки успешно отправлены! Кейпад сохранил их в EEPROM.");
     } catch (error) {
         alert("Ошибка при передаче данных: " + error.message);
