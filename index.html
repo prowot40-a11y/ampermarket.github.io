@@ -2,38 +2,172 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Настройка Макропада</title>
+    <title>Настройка Макропада STC</title>
     <style>
-        body { font-family: Arial, sans-serif; padding: 20px; }
-        button { padding: 10px 20px; font-size: 16px; cursor: pointer; margin: 5px; }
-        #status { margin-top: 20px; font-weight: bold; color: green; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        .header { text-align: center; margin-bottom: 20px; }
+        .controls { margin-bottom: 20px; text-align: center; }
+        button {
+            padding: 10px 20px; font-size: 16px; cursor: pointer;
+            border: none; border-radius: 5px; background-color: #007bff;
+            color: white; transition: background 0.3s; margin: 0 5px;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        #status { margin-top: 10px; font-weight: bold; }
+        .keypad-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;
+            background: #fff; padding: 20px; border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        .key-card {
+            background: #f9f9f9; border: 1px solid #ddd; border-radius: 8px;
+            padding: 15px; display: flex; flex-direction: column; align-items: center;
+        }
+        .key-card h3 { margin: 0 0 10px 0; font-size: 16px; color: #555; }
+        .input-group {
+            display: flex; flex-direction: column; width: 100%; margin-bottom: 8px;
+        }
+        .input-group label { font-size: 12px; color: #666; margin-bottom: 2px; }
+        select, input {
+            width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #ccc;
+            box-sizing: border-box; font-family: inherit;
+        }
+        input { text-transform: uppercase; }
     </style>
 </head>
 <body>
 
-    <h2>WebHID Configurator</h2>
-    <button id="connectBtn">Подключить Макропад</button>
-    <button id="saveBtn" disabled>Записать тестовый бинд (Кнопка 1 = 'A')</button>
-    <div id="status">Устройство не подключено</div>
+    <div class="header">
+        <h2>Конфигуратор Макропада (WebHID)</h2>
+        <p>Настройте комбинации: до 2-х модификаторов + 1 кнопка (например: Ctrl + Alt + DEL)</p>
+    </div>
+
+    <div class="controls">
+        <button id="connectBtn">Подключить устройство</button>
+        <button id="saveBtn" disabled>Сохранить в макропад</button>
+        <div id="status" style="color: #666;">Устройство не подключено</div>
+    </div>
+
+    <div class="keypad-grid" id="grid">
+        <!-- Кнопки сгенерируются через JS -->
+    </div>
+
+    <!-- Список подсказок для текстового поля -->
+    <datalist id="special-keys">
+        <option value="DEL"></option>
+        <option value="Enter"></option>
+        <option value="Space"></option>
+        <option value="Esc"></option>
+        <option value="Backspace"></option>
+        <option value="Tab"></option>
+    </datalist>
 
     <script>
+        // Битовые маски модификаторов
+        const modifiers = {
+            0x00: "Нет",
+            0x01: "Left Ctrl",
+            0x02: "Left Shift",
+            0x04: "Left Alt",
+            0x08: "Left Win"
+        };
+
+        // Обратный словарь: Символ -> HID код
+        const keycodesMap = {
+            "NONE": 0x00, "": 0x00,
+            "A": 0x04, "B": 0x05, "C": 0x06, "D": 0x07, "E": 0x08, "F": 0x09, "G": 0x0A, "H": 0x0B,
+            "I": 0x0C, "J": 0x0D, "K": 0x0E, "L": 0x0F, "M": 0x10, "N": 0x11, "O": 0x12, "P": 0x13,
+            "Q": 0x14, "R": 0x15, "S": 0x16, "T": 0x17, "U": 0x18, "V": 0x19, "W": 0x1A, "X": 0x1B,
+            "Y": 0x1C, "Z": 0x1D,
+            "1": 0x1E, "2": 0x1F, "3": 0x20, "4": 0x21, "5": 0x22, "6": 0x23, "7": 0x24, "8": 0x25,
+            "9": 0x26, "0": 0x27,
+            "ENTER": 0x28, "ESC": 0x29, "BACKSPACE": 0x2A, "TAB": 0x2B, "SPACE": 0x2C,
+            "DEL": 0x4C, // <--- ДОБАВЛЕН КОД КНОПКИ DELETE
+            "-": 0x2D, "=": 0x2E, "[": 0x2F, "]": 0x30, "\\": 0x31, ";": 0x33, "'": 0x34, "`": 0x35,
+            ",": 0x36, ".": 0x37, "/": 0x38
+        };
+
+        const reverseKeycodes = Object.fromEntries(Object.entries(keycodesMap).map(([k, v]) => [v, k]));
+
+        const defaultLayout = [
+            0x1E, 0x1F, 0x20, // 1, 2, 3
+            0x21, 0x22, 0x23, // 4, 5, 6
+            0x24, 0x25, 0x26, // 7, 8, 9
+            0x28, 0x27, 0x2C  // Enter, 0, Space
+        ];
+
+        const grid = document.getElementById('grid');
+
+        for (let i = 0; i < 12; i++) {
+            const card = document.createElement('div');
+            card.className = 'key-card';
+            card.innerHTML = `<h3>Кнопка ${i + 1}</h3>`;
+            
+            const mod1Group = document.createElement('div');
+            mod1Group.className = 'input-group';
+            mod1Group.innerHTML = `<label>Модификатор 1</label>`;
+            const mod1Select = document.createElement('select');
+            mod1Select.id = `mod1_${i}`;
+            for (const [val, name] of Object.entries(modifiers)) mod1Select.add(new Option(name, val));
+            mod1Group.appendChild(mod1Select);
+            
+            const mod2Group = document.createElement('div');
+            mod2Group.className = 'input-group';
+            mod2Group.innerHTML = `<label>Модификатор 2</label>`;
+            const mod2Select = document.createElement('select');
+            mod2Select.id = `mod2_${i}`;
+            for (const [val, name] of Object.entries(modifiers)) mod2Select.add(new Option(name, val));
+            mod2Group.appendChild(mod2Select);
+
+            const keyGroup = document.createElement('div');
+            keyGroup.className = 'input-group';
+            keyGroup.innerHTML = `<label>Кнопка (Буква/Цифра/DEL)</label>`;
+            const keyInput = document.createElement('input');
+            keyInput.type = 'text';
+            keyInput.id = `key_${i}`;
+            keyInput.setAttribute('list', 'special-keys'); 
+            
+            let defKey = reverseKeycodes[defaultLayout[i]];
+            keyInput.value = defKey === "SPACE" ? "Space" : defKey === "ENTER" ? "Enter" : defKey;
+
+            keyInput.addEventListener('input', function() {
+                let val = this.value.toUpperCase();
+                // ДОБАВЛЕН DEL В ИСКЛЮЧЕНИЯ
+                const specialWords = ["ENTER", "SPACE", "ESC", "BACKSPACE", "TAB", "DEL", "NONE"];
+                if (!specialWords.includes(val) && val.length > 1) {
+                    this.value = val.charAt(val.length - 1); 
+                }
+            });
+
+            keyGroup.appendChild(keyInput);
+            card.appendChild(mod1Group);
+            card.appendChild(mod2Group);
+            card.appendChild(keyGroup);
+            grid.appendChild(card);
+        }
+
         let hidDevice = null;
 
         document.getElementById('connectBtn').addEventListener('click', async () => {
             try {
-                // Ищем устройства с нашим Vendor-Defined Usage Page (0xFF00)
-                const devices = await navigator.hid.requestDevice({
-                    filters: [{ usagePage: 0xFF00 }]
-                });
-                
+                const devices = await navigator.hid.requestDevice({ filters: [{ usagePage: 0xFF00 }] });
                 if (devices.length > 0) {
                     hidDevice = devices[0];
                     await hidDevice.open();
                     document.getElementById('status').innerText = `Подключено: ${hidDevice.productName}`;
+                    document.getElementById('status').style.color = "green";
                     document.getElementById('saveBtn').disabled = false;
                 }
             } catch (error) {
-                console.error(error);
                 document.getElementById('status').innerText = "Ошибка подключения: " + error.message;
                 document.getElementById('status').style.color = "red";
             }
@@ -42,34 +176,26 @@
         document.getElementById('saveBtn').addEventListener('click', async () => {
             if (!hidDevice) return;
 
-            // Формируем массив из 25 байт (Report Count = 0x19)
             const data = new Uint8Array(25);
-            
-            data[0] = 0xAA; // Магический байт
-
-            // Заполняем дефолтными значениями (как в keymap.c)
-            const defaultKeys = [
-                0x1E, 0x1F, 0x20, // 1, 2, 3
-                0x21, 0x22, 0x23, // 4, 5, 6
-                0x24, 0x25, 0x26, // 7, 8, 9
-                0x28, 0x27, 0x2C  // Enter, 0, Space
-            ];
+            data[0] = 0xAA; 
 
             for (let i = 0; i < 12; i++) {
-                data[1 + (i * 2)] = 0x00; // Модификатор (без Shift/Ctrl)
-                data[1 + (i * 2) + 1] = defaultKeys[i]; // Скан-код
+                const mod1 = parseInt(document.getElementById(`mod1_${i}`).value);
+                const mod2 = parseInt(document.getElementById(`mod2_${i}`).value);
+                const keyStr = document.getElementById(`key_${i}`).value.toUpperCase();
+                
+                const finalMod = mod1 | mod2; 
+                const finalKey = keycodesMap[keyStr] !== undefined ? keycodesMap[keyStr] : 0x00;
+
+                data[1 + (i * 2)] = finalMod;
+                data[2 + (i * 2)] = finalKey;
             }
 
-            // ТЕСТ: Меняем первую кнопку (индекс 0) на букву 'A' (Скан-код 0x04)
-            data[1] = 0x00; // Модификатор
-            data[2] = 0x04; // Буква 'A'
-
             try {
-                // Отправляем на Report ID 2
                 await hidDevice.sendReport(2, data);
-                document.getElementById('status').innerText = "Настройки успешно записаны! Нажми кнопку 1 на макропаде.";
+                document.getElementById('status').innerText = "Настройки успешно сохранены в память!";
+                document.getElementById('status').style.color = "green";
             } catch (error) {
-                console.error(error);
                 document.getElementById('status').innerText = "Ошибка записи: " + error.message;
                 document.getElementById('status').style.color = "red";
             }
